@@ -45,7 +45,8 @@ class CompleteSentence(Problem, LanguageModel):
 
         # dada todas as ações possíveis, retornamos apenas 
         # aquelas que levam a um estado possível (i.e. cujo n-grama final aparece no texto)
-        return [action for action in total_actions if self.n_grams[self.result(estado, action)[-self.N:]] > 0]
+        final_n2gram = estado[-self.N2:]
+        return [action for action in total_actions if final_n2gram + (action, ) in self.n_grams]
     def result(self, estado, acao):
         """
         Retorna o estado resultante de aplicar acao em estado

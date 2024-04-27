@@ -1,5 +1,6 @@
 import math
 from UpperClasses import Problem, LanguageModel
+from nltk.util import ngrams
 
 class CompleteSentence2(Problem, LanguageModel):
     def __init__(self, texto, n, frase_inicial):
@@ -12,14 +13,11 @@ class CompleteSentence2(Problem, LanguageModel):
     Daqui para cima são funções relacionadas com preparar o modelo.
     Daqui para baixo são funções relacionadas com a busca.
     """ 
-    # modelo geral, ligeiramente modificado:
-    # guardamos a probabilidade de uma frase parcial no seu estado como forma de memoização
-    # idealmente para legibilidade só implementariamos uma classe Estado, mas para não mudar muito o programa evitei
-    # estado é representado como um par consistindo em:
-    # (tupla de palavras correspondendo à frase parcial (tupla de strings), negativo da log-probabilidade da frase parcial (float))
+    # modelo geral:
+    # estado: tupla de palavras correspondendo à frase parcial (tupla de strings)
     # ações: palavras (strings)
-    # transição: concatenar ação à frase parcial do estado atual e computar nova log-prob
-    # estados-meta: estados cuja frase parcial termina no marcador de fim de frase
+    # transição: concatenar ação ao estado atual
+    # estados-meta: estados terminados no marcador de fim de frase
     # custo: como pedido no enunciado
     def initialState(self):
         """
@@ -27,15 +25,14 @@ class CompleteSentence2(Problem, LanguageModel):
         """
         # assumimos que a frase inicial ja vem tratada
         # self.frase_inicial = self.BOS_mark+self.frase_inicial+self.EOS_mark
-        # convertemos em tupla de strings, inicializamos a frase com prob 0
-        return (tuple(self.frase_inicial.split()), 0)
+        # convertemos em tupla de strings
+        return tuple(self.frase_inicial.split())
     def isGoal(self, estado):
         """
         Testa se estado é um final de frase.
         """
         # só checa o final da frase
-        frase_parcial = estado[0]
-        return frase_parcial[-1].strip() == "</s>"
+        return estado[-1].strip() == "</s>"
     def actions(self, estado):
         """
         Retorna a lista de ações aplicáveis a estado.
@@ -51,42 +48,40 @@ class CompleteSentence2(Problem, LanguageModel):
         # aquelas que levam a um estado possível (i.e. cujo n-grama final da frase parcial aparece no texto)
         # ligeiramente modificado, computamos a nova frase parcial explicitamente
         # ao invés de chamar a função result, para evitar calcular a probabilidade
-        frase_parcial = estado[0]
-        return [action for action in total_actions if self.n_grams[frase_parcial[-self.N2:] + (action, )] > 0]
+        final_n2gram = estado[-self.N2:]
+        return [action for action in total_actions if final_n2gram + (action, ) in self.n_grams]
     def result(self, estado, acao):
         """
         Retorna o estado resultante de aplicar acao em estado
         """
-        # concatena a ação à frase parcial
-        frase_parcial = estado[0]
-        frase_parcial_nova = frase_parcial + (acao, )
+        # só concatena a ação
+        return estado + (acao, )
 
-        # assumindo que já conhecemos a probabilidade da frase parcial no estado inicial,
-        # a probabilidade da frase parcial no estado após a ação é só a probabilidade da do estado inicial
-        # multiplicada pela probabilidade de transição da ação, que já estavamos computando antes para o custo
-
-        # computamos a mesma log-probabilidade condicional que na outra classe
-        # (n-1)-grama no final da frase parcial atual
-        final_n2gram = frase_parcial[-self.N2:]
-        # n-grama no final da frase parcial após a ação
-        final_ngram = frase_parcial_nova[-self.N:]
-        # fórmula fornecida no enunciado
-        transition_log_prob = -math.log(self.n_grams[final_ngram]/self.n_grams_smaller[final_n2gram])
-
-        # já que tomamos o log, a log-probabilidade do novo estado é a soma da log-probabilidade do estado antigo
-        # com a log-probabilidade de transição
-        log_prob = estado[1] + transition_log_prob
-        return (frase_parcial_nova, log_prob)
-    
     def cost(self, estado1, acao, estado2):
         """
-        retorna a perplexidade do estado2.
+        retorna a diferença de perplexidade entre o estado1 e o estado2.
         """
-        # estado2 contêm informação sobre a sua log-probabilidade (obtida a partir de self.result(estado1, acao))
-        # basta processar essa informação em perplexidade
-        frase_parcial_final = estado2[0]
-        log_prob_final = estado2[1]
+        # computamos as perplexidades explicitamente
 
-        return log_prob_final / len(frase_parcial_final)
-    
+        # calculamos as log-probabilidades de todos os n-gramas presentes nos estados,
+        # menos o primeiro n-grama (que é só marcadores de começo de sentença e portanto tem prob 0),
+        # e acumulamos a sua soma
+        log_prob_sum_initial = 0
+        for n_gram in ngrams(estado1[1:], self.N):
+            # (n-1)-grama inicial do n-grama
+            n2gram = n_gram[:-1]
+            # fórmula fornecida no enunciado
+            log_prob_sum_initial += -math.log(self.n_grams[n_gram]/self.n_grams_smaller[n2gram])
+
+        log_prob_sum_final = 0
+        for n_gram in ngrams(estado2[1:], self.N):
+            # (n-1)-grama inicial do n-grama
+            n2gram = n_gram[:-1]
+            # fórmula fornecida no enunciado
+            log_prob_sum_final += -math.log(self.n_grams[n_gram]/self.n_grams_smaller[n2gram])
+        
+        # perplexidade é só a soma acumulada dividida pelo tamanho da frase
+        perp_initial = log_prob_sum_initial / (len(estado1))
+        perp_final = log_prob_sum_final / (len(estado2))
+        return perp_final - perp_initial
 
